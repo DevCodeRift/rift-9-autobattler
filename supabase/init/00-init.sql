@@ -10,48 +10,52 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS storage;
 CREATE SCHEMA IF NOT EXISTS _realtime;
-CREATE SCHEMA IF NOT EXISTS graphql_public;
 
--- Create required roles
+-- Create required roles (ignore errors if they exist)
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
-        CREATE ROLE anon NOLOGIN NOINHERIT;
-    END IF;
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
-        CREATE ROLE authenticated NOLOGIN NOINHERIT;
-    END IF;
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
-        CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
-    END IF;
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-        CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT;
-    END IF;
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_storage_admin') THEN
-        CREATE ROLE supabase_storage_admin NOLOGIN NOINHERIT;
-    END IF;
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticator') THEN
-        CREATE ROLE authenticator NOINHERIT LOGIN;
-    END IF;
-END
-$$;
+    CREATE ROLE anon NOLOGIN NOINHERIT;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
 
--- Grant role memberships
-GRANT anon TO authenticator;
-GRANT authenticated TO authenticator;
-GRANT service_role TO authenticator;
-GRANT supabase_auth_admin TO authenticator;
-GRANT supabase_storage_admin TO authenticator;
+DO $$
+BEGIN
+    CREATE ROLE authenticated NOLOGIN NOINHERIT;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+    CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+    CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+    CREATE ROLE supabase_storage_admin NOLOGIN NOINHERIT;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 -- Grant schema permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON SCHEMA public TO anon, authenticated, service_role;
-GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role, supabase_auth_admin;
+GRANT USAGE ON SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
-GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role, supabase_storage_admin;
+GRANT USAGE ON SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
 
--- Default privileges
+-- Default privileges for future tables
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
@@ -88,7 +92,6 @@ CREATE TABLE IF NOT EXISTS auth.users (
     phone_change VARCHAR(15) DEFAULT '',
     phone_change_token VARCHAR(255) DEFAULT '',
     phone_change_sent_at TIMESTAMPTZ,
-    confirmed_at TIMESTAMPTZ GENERATED ALWAYS AS (LEAST(email_confirmed_at, phone_confirmed_at)) STORED,
     email_change_token_current VARCHAR(255) DEFAULT '',
     email_change_confirm_status SMALLINT DEFAULT 0,
     banned_until TIMESTAMPTZ,
@@ -98,52 +101,15 @@ CREATE TABLE IF NOT EXISTS auth.users (
     deleted_at TIMESTAMPTZ
 );
 
--- Auth refresh tokens
-CREATE TABLE IF NOT EXISTS auth.refresh_tokens (
-    instance_id UUID,
-    id BIGSERIAL PRIMARY KEY,
-    token VARCHAR(255),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    revoked BOOLEAN,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    parent VARCHAR(255),
-    session_id UUID
-);
-
--- Auth sessions
-CREATE TABLE IF NOT EXISTS auth.sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    factor_id UUID,
-    aal VARCHAR(255),
-    not_after TIMESTAMPTZ,
-    refreshed_at TIMESTAMPTZ,
-    user_agent TEXT,
-    ip TEXT,
-    tag TEXT
-);
-
--- Create indexes
-CREATE INDEX IF NOT EXISTS users_instance_id_idx ON auth.users(instance_id);
-CREATE INDEX IF NOT EXISTS users_email_idx ON auth.users(email);
-CREATE INDEX IF NOT EXISTS refresh_tokens_token_idx ON auth.refresh_tokens(token);
-CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON auth.refresh_tokens(user_id);
-CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON auth.sessions(user_id);
-
--- Grant table permissions
+-- Grant table permissions to auth admin
 GRANT ALL ON auth.users TO supabase_auth_admin;
-GRANT ALL ON auth.refresh_tokens TO supabase_auth_admin;
-GRANT ALL ON auth.sessions TO supabase_auth_admin;
 GRANT SELECT ON auth.users TO anon, authenticated, service_role;
 
 -- ============================================
 -- AUTH FUNCTIONS
 -- ============================================
 
--- Function to get current user ID
+-- Function to get current user ID from JWT
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS UUID
 LANGUAGE sql
@@ -152,13 +118,13 @@ AS $$
     SELECT NULLIF(
         COALESCE(
             current_setting('request.jwt.claim.sub', true),
-            current_setting('request.jwt.claims', true)::json->>'sub'
+            (current_setting('request.jwt.claims', true)::json->>'sub')
         ),
         ''
     )::UUID;
 $$;
 
--- Function to get current user role
+-- Function to get current user role from JWT
 CREATE OR REPLACE FUNCTION auth.role()
 RETURNS TEXT
 LANGUAGE sql
@@ -167,22 +133,7 @@ AS $$
     SELECT NULLIF(
         COALESCE(
             current_setting('request.jwt.claim.role', true),
-            current_setting('request.jwt.claims', true)::json->>'role'
-        ),
-        ''
-    )::TEXT;
-$$;
-
--- Function to get current user email
-CREATE OR REPLACE FUNCTION auth.email()
-RETURNS TEXT
-LANGUAGE sql
-STABLE
-AS $$
-    SELECT NULLIF(
-        COALESCE(
-            current_setting('request.jwt.claim.email', true),
-            current_setting('request.jwt.claims', true)::json->>'email'
+            (current_setting('request.jwt.claims', true)::json->>'role')
         ),
         ''
     )::TEXT;
@@ -191,17 +142,15 @@ $$;
 -- Grant function permissions
 GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.email() TO anon, authenticated, service_role;
 
 -- ============================================
 -- REALTIME SETUP
 -- ============================================
 
--- Create publication for realtime (drop first if exists since CREATE PUBLICATION IF NOT EXISTS isn't available in older PG)
+-- Create publication for realtime
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
         CREATE PUBLICATION supabase_realtime;
     END IF;
-END
-$$;
+END $$;
