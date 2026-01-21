@@ -1,7 +1,7 @@
 services:
   # PostgreSQL Database
   db:
-    image: postgres:16-alpine
+    image: supabase/postgres:15.8.1.085
     container_name: rift9-db
     restart: unless-stopped
     environment:
@@ -21,7 +21,7 @@ services:
 
   # Supabase Studio (Admin Dashboard)
   supabase-studio:
-    image: supabase/studio:latest
+    image: supabase/studio:2025.12.17-sha-43f4f7f
     container_name: rift9-supabase-studio
     restart: unless-stopped
     environment:
@@ -60,7 +60,7 @@ services:
       - rift9-network
 
   supabase-auth:
-    image: supabase/gotrue:latest
+    image: supabase/gotrue:v2.184.0
     container_name: rift9-supabase-auth
     restart: unless-stopped
     environment:
@@ -96,7 +96,7 @@ services:
       - rift9-network
 
   supabase-rest:
-    image: postgrest/postgrest:latest
+    image: postgrest/postgrest:v12.2.3
     container_name: rift9-supabase-rest
     restart: unless-stopped
     environment:
@@ -114,7 +114,7 @@ services:
       - rift9-network
 
   supabase-realtime:
-    image: supabase/realtime:latest
+    image: supabase/realtime:v2.68.0
     container_name: rift9-supabase-realtime
     restart: unless-stopped
     environment:
@@ -140,7 +140,7 @@ services:
       - rift9-network
 
   supabase-storage:
-    image: supabase/storage-api:latest
+    image: supabase/storage-api:v1.33.0
     container_name: rift9-supabase-storage
     restart: unless-stopped
     environment:
@@ -168,7 +168,7 @@ services:
       - rift9-network
 
   supabase-imgproxy:
-    image: darthsim/imgproxy:latest
+    image: darthsim/imgproxy:v3.8.0
     container_name: rift9-supabase-imgproxy
     restart: unless-stopped
     environment:
@@ -182,7 +182,7 @@ services:
       - rift9-network
 
   supabase-meta:
-    image: supabase/postgres-meta:latest
+    image: supabase/postgres-meta:v0.95.1
     container_name: rift9-supabase-meta
     restart: unless-stopped
     environment:
