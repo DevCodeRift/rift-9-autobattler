@@ -1,7 +1,7 @@
 services:
   # PostgreSQL Database
   db:
-    image: supabase/postgres:15.8.1.085
+    image: postgres:16-alpine
     container_name: rift9-db
     restart: unless-stopped
     environment:
@@ -10,7 +10,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rift9}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
+      - ./supabase/init/00-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./supabase/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./supabase/migrations/002_seed_data.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rift9} -d ${POSTGRES_DB:-rift9}"]
       interval: 10s

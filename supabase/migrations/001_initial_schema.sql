@@ -443,11 +443,10 @@ CREATE POLICY "Users can create battles" ON battles
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO players (id, username, email)
+    INSERT INTO players (id, username)
     VALUES (
         NEW.id,
-        COALESCE(NEW.raw_user_meta_data->>'username', 'Commander_' || LEFT(NEW.id::text, 8)),
-        NEW.email
+        COALESCE(NEW.raw_user_meta_data->>'username', 'Commander_' || LEFT(NEW.id::text, 8))
     );
     RETURN NEW;
 END;
